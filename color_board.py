@@ -1,250 +1,221 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
-def create_empty_board() -> Dict[str, Optional[str]]:
+RESET = "\033[0m"
+
+# Base square colors
+BG_LIGHT = "\033[48;5;230m"   # tan
+BG_DARK = "\033[48;5;22m"     # forest green
+
+# Highlighting
+HIGHLIGHT_LIGHT = "\033[48;5;229m"  # yellow
+HIGHLIGHT_DARK = "\033[48;5;120m"   # light green
+SELECTED_BG = "\033[48;5;220m"      # gold
+
+# Purple for promotion or castling
+PROMO_LIGHT = "\033[48;5;183m"
+PROMO_DARK = "\033[48;5;91m"
+
+COLS = "abcdefgh"
+
+def setup_board() -> Dict[str, str]:
     board = {}
-    columns = "abcdefgh"
-    rows = "12345678"
-    for col in columns:
-        for row in rows:
-            board[col + row] = None
-    return board
-
-def setup_board() -> Dict[str, Optional[str]]:
-    board = create_empty_board()
-    for col in "abcdefgh":
+    for col in COLS:
         board[col + "2"] = "wp"
         board[col + "7"] = "bp"
-
-    # White back rank
-    board["a1"] = "wr"
-    board["b1"] = "wn"
-    board["c1"] = "wb"
-    board["d1"] = "wq"
-    board["e1"] = "wk"
-    board["f1"] = "wb"
-    board["g1"] = "wn"
-    board["h1"] = "wr"
-
-    # Black back rank
-    board["a8"] = "br"
-    board["b8"] = "bn"
-    board["c8"] = "bb"
-    board["d8"] = "bq"
-    board["e8"] = "bk"
-    board["f8"] = "bb"
-    board["g8"] = "bn"
-    board["h8"] = "br"
-
+    board.update({
+        'a1': 'wr', 'b1': 'wn', 'c1': 'wb', 'd1': 'wq', 'e1': 'wk', 'f1': 'wb', 'g1': 'wn', 'h1': 'wr',
+        'a8': 'br', 'b8': 'bn', 'c8': 'bb', 'd8': 'bq', 'e8': 'bk', 'f8': 'bb', 'g8': 'bn', 'h8': 'br',
+    })
     return board
 
-def promote_pawn(board: Dict[str, Optional[str]], square: str, color_char: str):
-    while True:
-        choice = input("Promote to (q, r, b, n): ").strip().lower()
-        if choice in ['q', 'r', 'b', 'n']:
-            board[square] = color_char + choice
-            print(f"Pawn promoted to {board[square]}!")
-            break
-        else:
-            print("Invalid choice. Choose one of q, r, b, n.")
+def inside_board(c: str, r: int) -> bool:
+    return 'a' <= c <= 'h' and 1 <= r <= 8
 
-def in_bounds(col: str, row: int) -> bool:
-    return col in "abcdefgh" and 1 <= row <= 8
+def is_path_clear(board: Dict[str, str], squares: List[str]) -> bool:
+    return all(sq not in board for sq in squares)
 
-def opponent(color: str) -> str:
-    return 'b' if color == 'w' else 'w'
+def is_square_attacked(board: Dict[str, str], square: str, attacker_color: str) -> bool:
+    for sq, piece in board.items():
+        if piece[0] != attacker_color:
+            continue
+        if square in generate_legal_moves(board, sq, ignore_castling=True):
+            return True
+    return False
 
-def generate_legal_moves(board: Dict[str, Optional[str]], square: str) -> List[str]:
+def generate_legal_moves(board: Dict[str, str], square: str, ignore_castling: bool = False) -> List[str]:
     piece = board.get(square)
     if not piece:
         return []
-    color = piece[0]
-    ptype = piece[1]
-    col, row = square[0], int(square[1])
-    moves = []
 
+    color, ptype = piece[0], piece[1]
+    row = int(square[1])
+    col = square[0]
     directions = []
-    cols = "abcdefgh"
+    moves = []
+    enemy = 'b' if color == 'w' else 'w'
 
-    if ptype == 'p':  # Pawn moves
-        direction = 1 if color == 'w' else -1
-        start_row = 2 if color == 'w' else 7
-        # Forward 1
-        fwd1 = col + str(row + direction)
-        if in_bounds(col, row + direction) and board.get(fwd1) is None:
-            moves.append(fwd1)
-            # Forward 2 if first move
-            fwd2 = col + str(row + 2*direction)
-            if row == start_row and board.get(fwd2) is None:
-                moves.append(fwd2)
-        # Captures
-        for dc in [-1, 1]:
-            c_col = chr(ord(col) + dc)
-            capture_sq = c_col + str(row + direction)
-            if in_bounds(c_col, row + direction):
-                target = board.get(capture_sq)
-                if target is not None and target[0] == opponent(color):
-                    moves.append(capture_sq)
+    if ptype == 'p':
+        step = 1 if color == 'w' else -1
+        fwd = col + str(row + step)
+        if inside_board(col, row + step) and fwd not in board:
+            moves.append(fwd)
+            if (color == 'w' and row == 2) or (color == 'b' and row == 7):
+                fwd2 = col + str(row + 2 * step)
+                if fwd2 not in board:
+                    moves.append(fwd2)
+        for dcol in [-1, 1]:
+            nc = chr(ord(col) + dcol)
+            target = nc + str(row + step)
+            if inside_board(nc, row + step):
+                if target in board and board[target][0] == enemy:
+                    moves.append(target)
 
-    elif ptype == 'r':  # Rook
+    elif ptype == 'r':
         directions = [(1,0), (-1,0), (0,1), (0,-1)]
-        for dc, dr in directions:
-            c_col, c_row = ord(col), row
-            while True:
-                c_col += dc
-                c_row += dr
-                if not in_bounds(chr(c_col), c_row):
-                    break
-                pos = chr(c_col) + str(c_row)
-                if board.get(pos) is None:
-                    moves.append(pos)
-                else:
-                    if board[pos][0] == opponent(color):
-                        moves.append(pos)
-                    break
-
-    elif ptype == 'b':  # Bishop
+    elif ptype == 'b':
         directions = [(1,1), (1,-1), (-1,1), (-1,-1)]
-        for dc, dr in directions:
-            c_col, c_row = ord(col), row
-            while True:
-                c_col += dc
-                c_row += dr
-                if not in_bounds(chr(c_col), c_row):
-                    break
-                pos = chr(c_col) + str(c_row)
-                if board.get(pos) is None:
-                    moves.append(pos)
-                else:
-                    if board[pos][0] == opponent(color):
-                        moves.append(pos)
-                    break
-
-    elif ptype == 'q':  # Queen (rook + bishop)
+    elif ptype == 'q':
         directions = [(1,0), (-1,0), (0,1), (0,-1), (1,1), (1,-1), (-1,1), (-1,-1)]
-        for dc, dr in directions:
-            c_col, c_row = ord(col), row
-            while True:
-                c_col += dc
-                c_row += dr
-                if not in_bounds(chr(c_col), c_row):
-                    break
-                pos = chr(c_col) + str(c_row)
-                if board.get(pos) is None:
-                    moves.append(pos)
-                else:
-                    if board[pos][0] == opponent(color):
-                        moves.append(pos)
-                    break
+    elif ptype == 'k':
+        for dx in [-1, 0, 1]:
+            for dy in [-1, 0, 1]:
+                if dx == dy == 0: continue
+                nc = chr(ord(col) + dx)
+                nr = row + dy
+                target = nc + str(nr)
+                if inside_board(nc, nr):
+                    if target not in board or board[target][0] != color:
+                        moves.append(target)
+        if not ignore_castling and board.get(square) == color + 'k':
+            if color == 'w' and square == 'e1':
+                # Kingside castling
+                if 'h1' in board and board['h1'] == 'wr' and is_path_clear(board, ['f1', 'g1']):
+                    if not any(is_square_attacked(board, sq, 'b') for sq in ['e1', 'f1', 'g1']):
+                        moves.append('g1')
+                # Queenside castling
+                if 'a1' in board and board['a1'] == 'wr' and is_path_clear(board, ['b1', 'c1', 'd1']):
+                    if not any(is_square_attacked(board, sq, 'b') for sq in ['e1', 'd1', 'c1']):
+                        moves.append('c1')
+            elif color == 'b' and square == 'e8':
+                # Kingside castling
+                if 'h8' in board and board['h8'] == 'br' and is_path_clear(board, ['f8', 'g8']):
+                    if not any(is_square_attacked(board, sq, 'w') for sq in ['e8', 'f8', 'g8']):
+                        moves.append('g8')
+                # Queenside castling
+                if 'a8' in board and board['a8'] == 'br' and is_path_clear(board, ['b8', 'c8', 'd8']):
+                    if not any(is_square_attacked(board, sq, 'w') for sq in ['e8', 'd8', 'c8']):
+                        moves.append('c8')
 
-    elif ptype == 'n':  # Knight
-        knight_moves = [(2,1), (2,-1), (-2,1), (-2,-1), (1,2), (1,-2), (-1,2), (-1,-2)]
-        for dc, dr in knight_moves:
-            c_col = chr(ord(col) + dc)
-            c_row = row + dr
-            if in_bounds(c_col, c_row):
-                pos = c_col + str(c_row)
-                target = board.get(pos)
-                if target is None or target[0] == opponent(color):
-                    moves.append(pos)
+    elif ptype == 'n':
+        for dx, dy in [(2,1),(1,2),(-1,2),(-2,1),(-2,-1),(-1,-2),(1,-2),(2,-1)]:
+            nc = chr(ord(col) + dx)
+            nr = row + dy
+            target = nc + str(nr)
+            if inside_board(nc, nr):
+                if target not in board or board[target][0] != color:
+                    moves.append(target)
 
-    elif ptype == 'k':  # King
-        king_moves = [(1,0), (-1,0), (0,1), (0,-1), (1,1), (1,-1), (-1,1), (-1,-1)]
-        for dc, dr in king_moves:
-            c_col = chr(ord(col) + dc)
-            c_row = row + dr
-            if in_bounds(c_col, c_row):
-                pos = c_col + str(c_row)
-                target = board.get(pos)
-                if target is None or target[0] == opponent(color):
-                    moves.append(pos)
+    for dc, dr in directions:
+        step = 1
+        while True:
+            nc = chr(ord(col) + dc * step)
+            nr = row + dr * step
+            target = nc + str(nr)
+            if not inside_board(nc, nr):
+                break
+            if target in board:
+                if board[target][0] != color:
+                    moves.append(target)
+                break
+            moves.append(target)
+            step += 1
 
     return moves
 
-def move_piece(board: Dict[str, Optional[str]], start: str, end: str) -> bool:
-    if start not in board or end not in board:
-        print("Invalid square.")
+def can_promote(piece: str, square: str) -> bool:
+    if piece not in ('wp', 'bp'):
         return False
-    piece = board[start]
+    rank = int(square[1])
+    return (piece == 'wp' and rank == 8) or (piece == 'bp' and rank == 1)
+
+def promote_pawn(board: Dict[str, str], square: str, new_piece_type: str) -> None:
+    color = board[square][0]
+    board[square] = color + new_piece_type
+
+def move_piece(board: Dict[str, str], start: str, end: str) -> bool:
+    piece = board.get(start)
     if not piece:
-        print(f"No piece at {start}.")
         return False
-    legal_moves = generate_legal_moves(board, start)
-    if end not in legal_moves:
-        print("Illegal move.")
+    legal = generate_legal_moves(board, start)
+    if end not in legal:
         return False
 
-    # Move piece
+    if piece[1] == 'k' and abs(ord(end[0]) - ord(start[0])) == 2:
+        # Castling move
+        if end[0] == 'g':
+            rook_start, rook_end = 'h' + start[1], 'f' + start[1]
+        else:
+            rook_start, rook_end = 'a' + start[1], 'd' + start[1]
+        board[rook_end] = board[rook_start]
+        del board[rook_start]
+
     board[end] = piece
-    board[start] = None
-
-    # Promotion for pawns only on last rank
-    color, ptype = piece[0], piece[1]
-    if ptype == 'p':
-        if (color == 'w' and end[1] == '8') or (color == 'b' and end[1] == '1'):
-            promote_pawn(board, end, color)
-
+    del board[start]
     return True
 
-def can_promote(piece: Optional[str], square: str) -> bool:
-    if not piece:
-        return False
-    if piece[1] != 'p':
-        return False
-    color = piece[0]
-    return (color == 'w' and square[1] == '8') or (color == 'b' and square[1] == '1')
+def print_board(board: Dict[str, str], legal_moves: Optional[List[str]] = None,
+                promotion_squares: Optional[List[str]] = None,
+                castling_squares: Optional[List[str]] = None,
+                selected_square: Optional[str] = None) -> None:
 
-def print_board(board: Dict[str, Optional[str]], selected_square: Optional[str]=None,
-                legal_moves: Optional[List[str]]=None, promotion_squares: Optional[List[str]]=None):
-    columns = "abcdefgh"
-    RESET = "\033[0m"
-    BG_LIGHT = "\033[47m"        # white
-    BG_DARK = "\033[48;5;22m"    # forest green (dark green)
-    FG_BLACK = "\033[30m"
+    col_indices = {c: i for i, c in enumerate(COLS)}
 
-    HIGHLIGHT_LIGHT = "\033[48;5;229m"  # light yellow for light squares highlight
-    HIGHLIGHT_DARK = "\033[48;5;154m"   # light green for dark squares highlight
-
-    PROMO_LIGHT = "\033[48;5;183m"      # purple-tinted for light squares promotion
-    PROMO_DARK = "\033[48;5;90m"        # purple-tinted for dark squares promotion
-
-    col_indices = {c: i for i, c in enumerate(columns)}
-
-    print("\n       " + "         ".join(columns))
+    print()
+    print("       " + "         ".join(COLS))
     print("  ⌜" + "─────────┬" * 7 + "─────────⌝")
 
-    for row in reversed("12345678"):
-        for line_type in ['top', 'mid', 'bot']:
-            if line_type == 'mid':
-                line = f"{row} │"
+    # Combine promotion and castling squares for purple highlight
+    purple_squares = set()
+    if promotion_squares:
+        purple_squares.update(promotion_squares)
+    if castling_squares:
+        purple_squares.update(castling_squares)
+
+    for r in reversed("12345678"):
+        for line in ["top", "mid", "bot"]:
+            if line == "top":
+                print(f"{r} │", end="")
             else:
-                line = "  │"
+                print("  │", end="")
 
-            for col in columns:
-                idx_sum = col_indices[col] + int(row)
-                square = col + row
-
+            for c in COLS:
+                sq = c + r
+                idx_sum = col_indices[c] + int(r)
                 base_bg = BG_LIGHT if idx_sum % 2 == 0 else BG_DARK
+                highlight_bg = HIGHLIGHT_LIGHT if idx_sum % 2 == 0 else HIGHLIGHT_DARK
+                promo_bg = PROMO_LIGHT if idx_sum % 2 == 0 else PROMO_DARK
 
-                if selected_square == square:
-                    bg = HIGHLIGHT_LIGHT if base_bg == BG_LIGHT else HIGHLIGHT_DARK
-                elif legal_moves and square in legal_moves:
-                    bg = HIGHLIGHT_LIGHT if base_bg == BG_LIGHT else HIGHLIGHT_DARK
-                elif promotion_squares and square in promotion_squares:
-                    bg = PROMO_LIGHT if base_bg == BG_LIGHT else PROMO_DARK
-                else:
-                    bg = base_bg
+                bg = base_bg
+                if sq in purple_squares:
+                    bg = promo_bg
+                elif legal_moves and sq in legal_moves:
+                    bg = highlight_bg
+                if selected_square == sq:
+                    bg = SELECTED_BG
 
-                if line_type == 'mid':
-                    piece = board.get(square)
-                    content = f"    {piece if piece else '  '}   "
-                else:
-                    content = "         "
+                piece = board.get(sq, "")
+                content = piece.center(5) if piece else "     "
 
-                line += f"{bg}{FG_BLACK}{content}{RESET}│"
-            print(line)
+                if line == "top" or line == "bot":
+                    print(bg + "         " + RESET, end="│")
+                elif line == "mid":
+                    print(bg + f"  {content}  " + RESET, end="│")
 
-        if row != '1':
+            if line == "mid":
+                print(f" {r}")
+            else:
+                print()
+
+        if r != "1":
             print("  ├" + "─────────┼" * 7 + "─────────┤")
-        else:
-            print("  ⌞" + "─────────┴" * 7 + "─────────⌟")
-
+    print("  ⌞" + "─────────┴" * 7 + "─────────⌟")
